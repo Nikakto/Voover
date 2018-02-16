@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 
 
-from PyQt5.QtCore import QDir, Qt
+from PyQt5.QtCore import QDir, Qt, pyqtSlot
 from PyQt5.QtGui import QImage, QPainter, QPalette, QPixmap
-from PyQt5.QtWidgets import (QAction, QApplication, QFileDialog, QLabel, QLayout,
-        QMainWindow, QMenu, QMessageBox, QScrollArea, QSlider, QSizePolicy, QVBoxLayout, QWidget)
+from PyQt5.QtWidgets import (QAction, QApplication, QFileDialog, QLabel,
+                             QMainWindow, QMenu, QMessageBox, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 from PyQt5.QtPrintSupport import QPrintDialog, QPrinter
 
 from functools import partial
@@ -17,6 +17,8 @@ class ImageViewer(QMainWindow):
 
     def __init__(self):
         super(ImageViewer, self).__init__()
+
+        self.resize(600, 800)
 
         self.filter_read = '''
             All (*.BMP *.GIF *.JPG *.JPEG *.PNG *.PBM *.PGM *.PPM *.XBM *.XPM);;
@@ -52,11 +54,12 @@ class ImageViewer(QMainWindow):
 
         self.scrollArea = QScrollArea()
         self.scrollArea.setBackgroundRole(QPalette.Dark)
+        self.scrollArea.setAlignment(Qt.AlignCenter)
         self.scrollArea.setWidget(self.imageLabel)
 
         # self.sl.valueChanged.connect(self.valuechange)
 
-        self.SlidersWidget = SliderTabsWidget(self.imageLabel)
+        self.SlidersWidget = SliderTabsWidget(self)
         self.SlidersWidget.setDisabled(True)
 
         # window box
@@ -75,10 +78,20 @@ class ImageViewer(QMainWindow):
         self.resize(500, 400)
 
     def effect(self, effect):
+        self.updateActions(state=False)
+        progressbar = self.SlidersWidget.progressbar
         image = self.imageLabel.pixmap().toImage()
-        image = effect(image)
+        thread = effects.Threader(image, effect, progressbar=progressbar)
+        thread.sig_done.connect(self.effected)
+        thread.sig_done.connect(progressbar.done)
+        thread.sig_step.connect(progressbar.set_value)
+        thread.start()
+
+    @pyqtSlot(QImage)
+    def effected(self, image):
         pixmap = QPixmap.fromImage(image)
         self.imageLabel.setPixmap(pixmap)
+        self.updateActions()
 
     def open(self):
         fileName, _ = QFileDialog.getOpenFileName(self, "Open File", QDir.currentPath(), filter=self.filter_read)
@@ -93,7 +106,6 @@ class ImageViewer(QMainWindow):
             self.imageLabel.setPixmap(self.origin_pixmap)
             self.scaleFactor = 1.0
 
-            self.print_act.setEnabled(True)
             self.fitToWindow_act.setEnabled(True)
             self.updateActions()
             self.reset_sliders()
@@ -222,23 +234,30 @@ class ImageViewer(QMainWindow):
         self.menuBar().addMenu(self.filterMenu)
         self.menuBar().addMenu(self.helpMenu)
 
-    def updateActions(self):
+    def updateActions(self, state=True):
 
-        self.zoomIn_act.setEnabled(not self.fitToWindow_act.isChecked())
-        self.zoomOut_act.setEnabled(not self.fitToWindow_act.isChecked())
-        self.save_act.setEnabled(not self.fitToWindow_act.isChecked())
-        self.normalSize_act.setEnabled(not self.fitToWindow_act.isChecked())
+        self.open_act.setEnabled(state)
+        self.print_act.setEnabled(state)
+        self.save_act.setEnabled(state)
 
-        self.remove_filters_act.setEnabled(not self.fitToWindow_act.isChecked())
-        self.greys_act.setEnabled(not self.fitToWindow_act.isChecked())
-        self.colorize_act.setEnabled(not self.fitToWindow_act.isChecked())
-        self.sepia_act.setEnabled(not self.fitToWindow_act.isChecked())
-        self.invert_act.setEnabled(not self.fitToWindow_act.isChecked())
-        self.black_white_act.setEnabled(not self.fitToWindow_act.isChecked())
-        self.noise_act.setEnabled(not self.fitToWindow_act.isChecked())
-        self.blue_yellow_act.setEnabled(not self.fitToWindow_act.isChecked())
+        self.zoomIn_act.setEnabled(not self.fitToWindow_act.isChecked() if state else False)
+        self.zoomOut_act.setEnabled(not self.fitToWindow_act.isChecked() if state else False)
+        self.normalSize_act.setEnabled(not self.fitToWindow_act.isChecked() if state else False)
+        self.fitToWindow_act.setEnabled(state)
 
-        self.SlidersWidget.setDisabled(False)
+        self.remove_filters_act.setEnabled(state)
+        self.greys_act.setEnabled(state)
+        self.colorize_act.setEnabled(state)
+        self.sepia_act.setEnabled(state)
+        self.invert_act.setEnabled(state)
+        self.black_white_act.setEnabled(state)
+        self.noise_act.setEnabled(state)
+        self.blue_yellow_act.setEnabled(state)
+
+        self.about_act.setEnabled(state)
+        self.aboutQt_act.setEnabled(state)
+
+        self.SlidersWidget.setEnabled(state)
 
     def scaleImage(self, factor):
         self.scaleFactor *= factor
@@ -260,6 +279,7 @@ if __name__ == '__main__':
 
     app = QApplication(sys.argv)
     imageViewer = ImageViewer()
+    imageViewer.resize(800, 600)
     imageViewer.show()
 
 sys.exit(app.exec_())

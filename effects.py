@@ -1,8 +1,9 @@
-from PyQt5.QtCore import QPoint
-from PyQt5.QtGui import QColor
+from PyQt5.QtCore import QPoint, QThread, pyqtSignal, pyqtSlot
+from PyQt5.QtGui import QColor, QImage
 
 import math
 import random
+from functools import wraps
 
 
 COLOR_MATRIX = {
@@ -15,33 +16,12 @@ COLOR_MATRIX = {
 }
 
 
-def each_pixel(effect):
-
-    def wrapper(image, **kwargs):
-
-        for i in range(image.width()):
-            for j in range(image.height()):
-                pixel = image.pixel(i, j)
-                r, g, b, a = QColor(pixel).getRgb()
-                r, g, b = effect(r, g, b, **kwargs)
-                new_pixel = QColor(r, g, b)
-                image.setPixel(QPoint(i, j), new_pixel.rgb())
-
-            print('line: %s/%s' % (i, image.width()))
-
-        return image
-
-    return wrapper
-
-
-@each_pixel
 def black_white(r, g, b):
     if (r + g + b)/3 > 128:
         return 255, 255, 255
     return 0, 0, 0
 
 
-@each_pixel
 def blue(r, g, b, factor=0):
     b = b + factor
     if b > 255:
@@ -51,13 +31,11 @@ def blue(r, g, b, factor=0):
     return r, g, b
 
 
-@each_pixel
 def blue_yellow(r, g, b):
     m = (r+g)/2
     return m, m, b
 
 
-@each_pixel
 def brightness(r, g, b, factor=0):
 
     rgb = [r, g, b]
@@ -74,7 +52,6 @@ def brightness(r, g, b, factor=0):
     return rgb
 
 
-@each_pixel
 def colorize(r, g, b, color_matrix=COLOR_MATRIX):
 
     m = (r+g+b)/3
@@ -87,7 +64,6 @@ def colorize(r, g, b, color_matrix=COLOR_MATRIX):
     return rgb
 
 
-@each_pixel
 def contrast(r, g, b, factor=0):
 
     factor = (259 * (factor + 255)) / (255 * (259 - factor));
@@ -106,7 +82,7 @@ def contrast(r, g, b, factor=0):
     return rgb
 
 
-def floodfill(image, color_matrix=COLOR_MATRIX):
+def floodfill(image, color_matrix=COLOR_MATRIX, signal=None):
 
     def _same_color(rgb_a, rgb_b, sensitive):
         m_a = sum(rgb_a[:3])/3
@@ -120,7 +96,13 @@ def floodfill(image, color_matrix=COLOR_MATRIX):
 
     # floodfilling
     for i in range(image.width()):
-        print('line: %s/%s' % (i, image.width()))
+
+        if signal:
+            signal.emit(i)
+
+        if i % 100 == 0:
+            print('line: %s/%s' % (i, image.width()))
+
         for j in range(image.height()):
 
             if pixel_bitmap[i][j]:
@@ -165,7 +147,6 @@ def floodfill(image, color_matrix=COLOR_MATRIX):
     return image
 
 
-@each_pixel
 def green(r, g, b, factor=0):
     g = g + factor
     if g > 255:
@@ -175,17 +156,14 @@ def green(r, g, b, factor=0):
     return r, g, b
 
 
-@each_pixel
 def grey(r, g, b):
     return [(r+g+b)/3] * 3
 
 
-@each_pixel
 def invert(r, g, b):
     return 255-r, 255-g, 255-b
 
 
-@each_pixel
 def noise(r, g, b, ratio=0.5):
 
     rgb = [r, g, b]
@@ -204,7 +182,6 @@ def noise(r, g, b, ratio=0.5):
     return rgb
 
 
-@each_pixel
 def red(r, g, b, factor=0):
     r = r + factor
     if r > 255:
@@ -214,7 +191,6 @@ def red(r, g, b, factor=0):
     return r, g, b
 
 
-@each_pixel
 def sepia(r, g, b, depth=25):
 
     m = (r+g+b)/3
@@ -229,3 +205,72 @@ def sepia(r, g, b, depth=25):
             colors[index] = 255
 
     return colors
+
+
+class Threader(QThread):
+
+    hack_title = {
+        black_white.__name__: 'Black and white image: %p%',
+        blue.__name__: 'Blue chanel: %p%',
+        blue_yellow.__name__: 'Blue and yellow image: %p%',
+        brightness.__name__: 'Brightness: %p%',
+        colorize.__name__: 'Fake color: %p%',
+        contrast.__name__: 'Contrast: %p%',
+        floodfill.__name__: 'Fake color (floodfill): %p%',
+        green.__name__: 'Green chanel: %p%',
+        grey.__name__: 'Greys: %p%',
+        invert.__name__: 'Invert colors: %p%',
+        noise.__name__: 'Noize: %p%',
+        red.__name__: 'Red chanel: %p%',
+        sepia.__name__:  'Sepia: %p%',
+    }
+
+    sig_done = pyqtSignal(QImage)
+    sig_step = pyqtSignal(int)
+
+    def __init__(self, image, effect, progressbar=None, **kwargs):
+        super().__init__()
+        self.image = image
+        self.effect = effect
+        self.kwargs = kwargs
+
+        if progressbar:
+            self.progressbar = progressbar
+            self.progressbar.setRange(0, self.image.width())
+
+    @pyqtSlot()
+    def run(self):
+        self.apply_effects()
+        self.sig_done.emit(self.image)
+
+    def apply_effects(self):
+        if isinstance(self.effect, (list, tuple)):
+            for effect, kwargs in self.effect:
+                if effect is not None:
+                    self.apply_effect(effect, kwargs)
+        else:
+            self.apply_effect(self.effect, self.kwargs)
+
+    def apply_effect(self, effect, kwargs):
+
+        if self.progressbar:
+            self.progressbar.setFormat(self.hack_title.get(effect.__name__, '%p%'))
+
+        if effect.__name__ != floodfill.__name__:
+            for i in range(self.image.width()):
+                for j in range(self.image.height()):
+                    pixel = self.image.pixel(i, j)
+                    r, g, b, a = QColor(pixel).getRgb()
+                    r, g, b = effect(r, g, b, **kwargs)
+                    new_pixel = QColor(r, g, b)
+                    self.image.setPixel(QPoint(i, j), new_pixel.rgb())
+
+                # if self.progressbar:
+                #     self.progressbar.setValue(i)
+
+                self.sig_step.emit(i)
+                if (i+1) % 100 == 0 or i+1 == self.image.width():
+                    print('line: %s/%s' % (i+1, self.image.width()))
+
+        else:
+            self.image = floodfill(self.image, signal=self.sig_step)
