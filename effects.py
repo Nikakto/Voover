@@ -1,4 +1,4 @@
-from PyQt5.QtCore import QPoint, QThread, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import QObject, QPoint, QThread, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QColor, QImage
 
 import math
@@ -13,6 +13,10 @@ COLOR_MATRIX = {
     3: (0,   255, 255),
     4: (255, 0,   255),
     5: (255, 255, 0),
+	6: (0, 200, 255),
+	7: (128, 128, 255),
+	8: (255, 128, 128),
+	9: (128, 255, 128),
 }
 
 
@@ -85,11 +89,11 @@ def contrast(r, g, b, factor=0):
 def floodfill(image, color_matrix=COLOR_MATRIX, signal=None):
 
     def _same_color(rgb_a, rgb_b, sensitive):
-        m_a = sum(rgb_a[:3])/3
-        m_b = sum(rgb_b[:3])/3
+        m_a = sum(rgb_a[:3])
+        m_b = sum(rgb_b[:3])
         return abs(m_a - m_b) < sensitive/2
 
-    color_step = int(math.ceil(255 / (len(color_matrix) - 1)))
+    color_step = int(math.ceil(255*3 / (len(color_matrix) - 1)))
 
     # map of pixels
     pixel_bitmap = [[None] * image.height() for i in range(image.width())]
@@ -207,7 +211,7 @@ def sepia(r, g, b, depth=25):
     return colors
 
 
-class Threader(QThread):
+class Threader(QObject):
 
     hack_title = {
         black_white.__name__: 'Black and white image: %p%',
@@ -243,14 +247,6 @@ class Threader(QThread):
         self.apply_effects()
         self.sig_done.emit(self.image)
 
-    def apply_effects(self):
-        if isinstance(self.effect, (list, tuple)):
-            for effect, kwargs in self.effect:
-                if effect is not None:
-                    self.apply_effect(effect, kwargs)
-        else:
-            self.apply_effect(self.effect, self.kwargs)
-
     def apply_effect(self, effect, kwargs):
 
         if self.progressbar:
@@ -274,3 +270,11 @@ class Threader(QThread):
 
         else:
             self.image = floodfill(self.image, signal=self.sig_step)
+
+    def apply_effects(self):
+        if isinstance(self.effect, (list, tuple)):
+            for effect, kwargs in self.effect:
+                if effect is not None:
+                    self.apply_effect(effect, kwargs)
+        else:
+            self.apply_effect(self.effect, self.kwargs)

@@ -126,14 +126,22 @@ class SliderTabsWidget(QTabWidget):
         self.setFixedHeight(200)
 
     def apply(self):
+
+        self.main_window.updateActions(state=False)
+
         filters = self.tab_bc.apply() + self.tab_rgb.apply()
         image = self.imageLabel.pixmap().toImage()
-        thread = effects.Threader(image, filters, progressbar=self.progressbar)
-        thread.sig_done.connect(self.main_window.effected)
-        thread.sig_done.connect(self.progressbar.done)
-        thread.sig_step.connect(self.progressbar.set_value)
-        self.main_window.updateActions(state=False)
-        thread.start()
+
+        self.main_window.thread = effects.Threader(image, filters, progressbar=self.progressbar)
+        self.main_window.thread.moveToThread(self.main_window.back_thread)
+
+        self.main_window.thread.sig_done.connect(self.main_window.effected)
+        self.main_window.thread.sig_done.connect(self.progressbar.done)
+        self.main_window.thread.sig_step.connect(self.progressbar.set_value)
+
+        self.main_window.back_thread.started.connect(self.main_window.thread.run)
+        self.main_window.back_thread.started.emit()
+
         self.reset()
 
     def reset(self):

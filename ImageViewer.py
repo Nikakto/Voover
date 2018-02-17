@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 
-from PyQt5.QtCore import QDir, Qt, pyqtSlot
+from PyQt5.QtCore import QDir, Qt, QThread, pyqtSlot
 from PyQt5.QtGui import QImage, QPainter, QPalette, QPixmap
 from PyQt5.QtWidgets import (QAction, QApplication, QFileDialog, QLabel,
                              QMainWindow, QMenu, QMessageBox, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
@@ -16,9 +16,8 @@ from components import SliderTabsWidget
 class ImageViewer(QMainWindow):
 
     def __init__(self):
-        super(ImageViewer, self).__init__()
 
-        self.resize(600, 800)
+        super(ImageViewer, self).__init__()
 
         self.filter_read = '''
             All (*.BMP *.GIF *.JPG *.JPEG *.PNG *.PBM *.PGM *.PPM *.XBM *.XPM);;
@@ -41,6 +40,9 @@ class ImageViewer(QMainWindow):
             X11 Bitmap (*.XBM);;
             X11 Pixmap (*.XPM);;
         '''
+
+        self.back_thread = QThread()
+        self.back_thread.start()
 
         self.origin_pixmap = QPixmap()
         self.printer = QPrinter()
@@ -78,14 +80,21 @@ class ImageViewer(QMainWindow):
         self.resize(500, 400)
 
     def effect(self, effect):
+
         self.updateActions(state=False)
+
         progressbar = self.SlidersWidget.progressbar
         image = self.imageLabel.pixmap().toImage()
-        thread = effects.Threader(image, effect, progressbar=progressbar)
-        thread.sig_done.connect(self.effected)
-        thread.sig_done.connect(progressbar.done)
-        thread.sig_step.connect(progressbar.set_value)
-        thread.start()
+
+        self.thread = effects.Threader(image, effect, progressbar=progressbar)
+        self.thread.moveToThread(self.back_thread)
+
+        self.thread.sig_done.connect(progressbar.done)
+        self.thread.sig_done.connect(self.effected)
+        self.thread.sig_step.connect(progressbar.set_value)
+
+        self.back_thread.started.connect(self.thread.run)
+        self.back_thread.started.emit()
 
     @pyqtSlot(QImage)
     def effected(self, image):
